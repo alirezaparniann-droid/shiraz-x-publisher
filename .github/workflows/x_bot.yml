@@ -34,6 +34,21 @@ jobs:
         run: |
           python x_worker.py
 
+      - name: Run Nightly Telegram Report (12 AM Iran Time or Manual Test)
+        if: always()
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          HOUR_UTC=$(date -u +%H)
+          MIN_UTC=$(date -u +%M)
+          # ساعت 20:20 تا 20:35 به وقت جهانی معادل ساعت 23:50 تا 00:05 شب به وقت ایران است
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ( [ "$HOUR_UTC" = "20" ] && [ "$MIN_UTC" -ge 20 ] && [ "$MIN_UTC" -le 35 ] ); then
+            if [ -f nightly_report.py ]; then
+              python nightly_report.py
+            fi
+          fi
+
       - name: Save Posted IDs History
         if: always()
         run: |
