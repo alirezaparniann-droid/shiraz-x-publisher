@@ -31,10 +31,12 @@ def to_persian_num(text):
     return text.translate(str.maketrans(en_nums, fa_nums))
 
 def clean_text_line(line):
-    line = re.sub(r"^[\s🔴🟠🟡🟢🔵🟣⚫️⚪️🟤🚨📌⚽️🌤🔹🔸▫️▪️•\-_#*«»]+", "", line)
+    line = re.sub(r"^[\s🔴🟠🟡🟢🔵🟣⚫️⚪️🟤🚨📌⚽️🌤🔹🔸▫️▪️•\-_#*«»🎬]+", "", line)
     return to_persian_num(line.strip())
 
-def detect_category_icon(text):
+def detect_category_icon(text, has_video=False):
+    if has_video:
+        return "🎬"
     if re.search("فوری|حادثه|آتش|انفجار|تصادف|اورژانس|پلیس", text):
         return "🚨"
     if re.search("فوتبال|فجر|ورزش|لیگ|ورزشگاه", text):
@@ -43,10 +45,7 @@ def detect_category_icon(text):
         return "🌤"
     return "📌"
 
-def format_for_x(raw_text):
-    """
-    فرمت اختصاصی: فقط تیتر + یک خط فاصله + لید کامل خبر
-    """
+def format_for_x(raw_text, has_video=False):
     lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
     filtered_lines = [
         l for l in lines
@@ -55,6 +54,7 @@ def format_for_x(raw_text):
             or "@" in l
             or "shirazlastnews" in l.lower()
             or "آخرین خبرهای شیراز" in l
+            or "منبع خبر:" in l
             or l.startswith("#")
         )
     ]
@@ -62,10 +62,9 @@ def format_for_x(raw_text):
     if not filtered_lines:
         return None
 
-    icon = detect_category_icon(raw_text)
+    icon = detect_category_icon(raw_text, has_video=has_video)
     headline = clean_text_line(filtered_lines[0])
 
-    # پیدا کردن لید خبر (اولین خط کامل بعد از تیتر)
     lead = ""
     for l in filtered_lines[1:]:
         cleaned = clean_text_line(l)
@@ -80,15 +79,12 @@ def format_for_x(raw_text):
 
     combined = f"{header}\n\n▪️ {lead}"
 
-    # اگر تیتر و لید کامل جا می‌شود و فضای کافی برای دو هشتگ هم هست:
     if len(combined) <= 250:
         return f"{combined}\n\n#شیراز #اخبار_شیراز"
 
-    # اگر تیتر و لید کامل تا ۲۷۸ کاراکتر جا می‌شود، کل ظرفیت را به تیتر و لید بده (بدون هشتگ تا لید کامل بماند)
     if len(combined) <= 278:
         return combined
 
-    # اگر مجموع تیتر و لید از ۲۷۸ کاراکتر بیشتر بود، تا آخرین کلمه ممکن از لید را حفظ کن
     available_for_lead = 274 - len(header) - 6
     if available_for_lead > 30:
         full_possible_lead = lead[:available_for_lead].rsplit(" ", 1)[0] + "…"
@@ -111,8 +107,15 @@ def fetch_latest_telegram_posts():
 
         raw_text = text_elem.get_text("\n").strip()
 
+        # ۱. بررسی وجود ویدیو در پست تلگرام (مورد ۲۹)
+        video_url = None
+        video_elem = wrap.select_one("video.tgme_widget_message_video")
+        if video_elem and video_elem.get("src"):
+            video_url = video_elem.get("src")
+
+        # ۲. بررسی وجود عکس یا تامبنیل ویدیو
         photo_url = None
-        photo_elem = wrap.select_one(".tgme_widget_message_photo_wrap")
+        photo_elem = wrap.select_one(".tgme_widget_message_photo_wrap, .tgme_widget_message_video_thumb")
         if photo_elem and "background-image" in photo_elem.get("style", ""):
             match = re.search(r"url\(['\"]?(.*?)['\"]?\)", photo_elem["style"])
             if match:
@@ -121,15 +124,37 @@ def fetch_latest_telegram_posts():
         posts.append({
             "id": post_id,
             "text": raw_text,
-            "photo_url": photo_url
+            "photo_url": photo_url,
+            "video_url": video_url
         })
     return posts
 
-def post_with_real_browser(tweet_text, photo_url=None):
-    if not X_AUTH_TOKEN or not X_CT0:
-        raise RuntimeError("مقادیر X_AUTH_TOKEN و X_CT0 در GitHub Secrets خالی هستند!")
+def download_media_for_x(photo_url=None, video_url=None):
+    """دانلود هوشمند ویدیو (زیر ۳۵ مگابایت) یا تصویر خبر"""
+    if video_url:
+        try:
+            print("در حال بررسی و دانلود ویدیوی خبر برای X...")
+            r = requests.get(video_url, stream=True, timeout=25)
+            if r.status_code == 200:
+                vid_path = os.path.abspath("temp_news_video.mp4")
+                size = 0
+                too_large = False
+                with open(vid_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=1024 * 512):
+                        if chunk:
+                            f.write(chunk)
+                            size += len(chunk)
+                            if size > 35 * 1024 * 1024:
+                                too_large = True
+                                break
+                if not too_large and size > 20000:
+                    print(f"ویدیو با موفقیت دانلود شد ({round(size / (1024*1024), 1)} MB).")
+                    return vid_path, True
+                else:
+                    print("ویدیو بیش از حد سنگین بود؛ استفاده از تصویر کاور به جای ویدیو.")
+        except Exception as e:
+            print(f"خطا در دانلود ویدیو: {e}")
 
-    image_path = None
     if photo_url:
         try:
             img_data = requests.get(photo_url, timeout=15).content
@@ -137,9 +162,17 @@ def post_with_real_browser(tweet_text, photo_url=None):
             with open(image_path, "wb") as f:
                 f.write(img_data)
             print("تصویر خبر دانلود شد.")
+            return image_path, False
         except Exception as e:
             print(f"خطا در دانلود تصویر خبر: {e}")
-            image_path = None
+
+    return None, False
+
+def post_with_real_browser(tweet_text, photo_url=None, video_url=None):
+    if not X_AUTH_TOKEN or not X_CT0:
+        raise RuntimeError("مقادیر X_AUTH_TOKEN و X_CT0 در GitHub Secrets خالی هستند!")
+
+    media_path, is_video = download_media_for_x(photo_url, video_url)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -179,35 +212,41 @@ def post_with_real_browser(tweet_text, photo_url=None):
         textbox.click()
         page.wait_for_timeout(1000)
 
-        if image_path and os.path.exists(image_path):
+        if media_path and os.path.exists(media_path):
             try:
                 file_input = page.locator('input[data-testid="fileInput"]').first
-                file_input.set_input_files(image_path)
-                print("تصویر بارگذاری شد...")
-                page.wait_for_timeout(6000)
+                file_input.set_input_files(media_path)
+                if is_video:
+                    print("ویدیو بارگذاری شد؛ انتظار برای پردازش ویدیو در سرور X...")
+                    page.wait_for_timeout(18000)
+                else:
+                    print("تصویر بارگذاری شد...")
+                    page.wait_for_timeout(6000)
             except Exception as e:
-                print(f"ادامه بدون پیوست فایل تصویر: {e}")
+                print(f"ادامه بدون پیوست فایل رسانه: {e}")
 
-        # وارد کردن متن و اضافه کردن یک فاصله در انتها برای بسته شدن منوی هشتگ
         textbox.fill(tweet_text + " ")
         page.wait_for_timeout(1500)
 
-        # بستن هرگونه پاپ‌آپ یا منوی پیشنهادی هشتگ که روی دکمه Post را می‌پوشاند
         page.keyboard.press("Escape")
         page.wait_for_timeout(500)
 
-        # روش ۱: کلیک مستقیم جاوااسکریپتی که از تمام لایه‌های مزاحم عبور می‌کند
         post_button = page.locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]').first
+        # اگر ویدیو در حال پردازش نهایی است، تا آماده شدن دکمه Post صبر کن
+        for _ in range(10):
+            if post_button.get_attribute("aria-disabled") == "true":
+                page.wait_for_timeout(2000)
+            else:
+                break
+
         if post_button.count() > 0:
             post_button.evaluate("el => el.click()")
             print("دستور ارسال از طریق جاوااسکریپت اجرا شد.")
         else:
-            # روش ۲: شورتکات رسمی ارسال پست در X
             page.keyboard.press("Control+Enter")
-            print("دستور ارسال با شورتکات کیبورد اجرا شد.")
 
-        page.wait_for_timeout(6000)
-        print("✅ تیتر و لید خبر با موفقیت در X منتشر شد!")
+        page.wait_for_timeout(8000 if is_video else 6000)
+        print("✅ خبر با موفقیت در X منتشر شد!")
         browser.close()
 
 def main():
@@ -221,8 +260,8 @@ def main():
     new_posts = [p for p in posts if p["id"] not in history]
 
     if not new_posts:
-        if EVENT_NAME == "workflow_dispatch":
-            print("اجرای دستی: ارسال آخرین خبر برای تست...")
+        if EVENT_NAME in ("workflow_dispatch", "repository_dispatch"):
+            print("اجرای دستی یا فرمان VIP: ارسال آخرین خبر...")
             target_post = posts[-1]
         else:
             print("همه اخبار فعلی قبلاً در X منتشر شده‌اند.")
@@ -230,11 +269,12 @@ def main():
     else:
         target_post = new_posts[-1]
 
-    tweet_text = format_for_x(target_post["text"])
+    has_vid = bool(target_post.get("video_url"))
+    tweet_text = format_for_x(target_post["text"], has_video=has_vid)
     if not tweet_text:
         return
 
-    post_with_real_browser(tweet_text, target_post["photo_url"])
+    post_with_real_browser(tweet_text, target_post["photo_url"], target_post.get("video_url"))
 
     for p in posts:
         if p["id"] not in history:
