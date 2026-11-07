@@ -1,26 +1,24 @@
 import os
 import re
 import json
-import time
 import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
-# خواندن کوکی‌ها از GitHub Secrets
 X_AUTH_TOKEN = os.environ.get("X_AUTH_TOKEN", "").strip()
 X_CT0 = os.environ.get("X_CT0", "").strip()
 CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "shirazlastnews").strip()
 
 HISTORY_FILE = "posted_x_ids.json"
 
-# بانک جامع هشتگ‌های ترند شیراز و ایران در X
+# بانک هشتگ‌های ترند شیراز و ایران در X
 TAG_RULES = {
-    "فوتبال|فجر|سپاسی|لیگ|ورزش|استقلال|پرسپولیس|ورزشگاه|پارس": ["#فجر_سپاسی", "#فوتبال", "#ورزش_فارس"],
-    "حادثه|آتش|تصادف|اورژانس|پلیس|بازداشت|قتل|سرقت|انفجار": ["#حوادث", "#خبر_فوری", "#حوادث_شیراز"],
+    "فوتبال|فجر|سپاسی|لیگ|ورزش|استقلال|پرسپولیس|ورزشگاه|پارس": ["#فجر_سپاسی", "#ورزش_فارس"],
+    "حادثه|آتش|تصادف|اورژانس|پلیس|بازداشت|قتل|سرقت|انفجار": ["#حوادث_شیراز", "#خبر_فوری"],
     "شهرداری|مترو|ترافیک|شورای_شهر|عمران|خیابان|پل|بزرگراه": ["#شهرداری_شیراز", "#کلانشهر_شیراز"],
-    "هواشناسی|باران|برف|آلودگی|دما|سد|آب|برق": ["#هواشناسی", "#وضعیت_هوا"],
+    "هواشناسی|باران|برف|آلودگی|دما|سد|آب|برق": ["#هواشناسی_فارس", "#وضعیت_هوا"],
     "طلا|سکه|دلار|تورم|بازار|قیمت|اقتصاد|مسکن": ["#اقتصاد", "#بازار_شیراز"],
-    "حافظیه|سعدی|تخت_جمشید|گردشگری|مسافر|میراث|کافه": ["#گردشگری", "#شیرازگردی"]
+    "حافظیه|سعدی|تخت_جمشید|گردشگری|مسافر|میراث|کافه": ["#شیرازگردی", "#گردشگری"]
 }
 
 def load_history():
@@ -36,56 +34,92 @@ def save_history(history):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(history[-200:], f, ensure_ascii=False, indent=2)
 
+def to_persian_num(text):
+    """تبدیل اعداد انگلیسی به فارسی برای زیبایی بصری متن"""
+    en_nums = "0123456789"
+    fa_nums = "۰۱۲۳۴۵۶۷۸۹"
+    trans_table = str.maketrans(en_nums, fa_nums)
+    return text.translate(trans_table)
+
+def clean_text_line(line):
+    """حذف ایموجی‌ها و کاراکترهای تکراری ابتدای خطوط کپی شده از تلگرام"""
+    line = re.sub(r"^[\s🔴🟠🟡🟢🔵🟣⚫️⚪️🟤🚨📌⚽️🌤🔹🔸▫️▪️•\-_#*]+", "", line)
+    return to_persian_num(line.strip())
+
+def detect_luxury_badge(text):
+    if re.search("فوری|حادثه|آتش|انفجار|تصادف|اورژانس|پلیس", text):
+        return "🔴 فوری | شیراز"
+    if re.search("فوتبال|فجر|ورزش|لیگ|ورزشگاه", text):
+        return "⚽️ ورزشی | شیراز"
+    if re.search("هواشناسی|باران|برف|دما|آلودگی", text):
+        return "🌤 هواشناسی | فارس"
+    if re.search("طلا|سکه|دلار|قیمت|بازار|اقتصاد", text):
+        return "📊 اقتصادی | شیراز"
+    if re.search("شهرداری|مترو|ترافیک|شورای_شهر|خیابان|پل", text):
+        return "🏛 شهرنگار | شیراز"
+    return "💎 سرخط | شیراز"
+
 def select_smart_hashtags(text):
-    tags = ["#شیراز", "#اخبار_شیراز", "#فارس"]
+    tags = ["#شیراز", "#اخبار_شیراز"]
     for pattern, pattern_tags in TAG_RULES.items():
         if re.search(pattern, text):
             for t in pattern_tags:
                 if t not in tags:
                     tags.append(t)
-    return " ".join(tags[:5])
-
-def detect_category_emoji(text):
-    if re.search("فوری|حادثه|آتش|انفجار|تصادف", text):
-        return "🚨"
-    if re.search("فوتبال|فجر|ورزش|لیگ", text):
-        return "⚽️"
-    if re.search("هواشناسی|باران|برف|دما", text):
-        return "🌤"
-    return "📌"
+    return " ".join(tags[:4])
 
 def format_for_x(raw_text, post_id):
     lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
-    clean_lines = [l for l in lines if not ("t.me/" in l or "@" in l or "shirazlastnews" in l.lower())]
+    # حذف خطوط تبلیغاتی، آیدی‌ها و لینک‌های انتهای پست تلگرام
+    filtered_lines = [
+        l for l in lines
+        if not ("t.me/" in l or "@" in l or "shirazlastnews" in l.lower() or "آخرین خبرهای شیراز" in l)
+    ]
     
-    if not clean_lines:
+    if not filtered_lines:
         return None
 
-    emoji = detect_category_emoji(raw_text)
-    headline = clean_lines[0]
-    body = " ".join(clean_lines[1:]) if len(clean_lines) > 1 else ""
+    badge = detect_luxury_badge(raw_text)
+    headline = clean_text_line(filtered_lines[0])
+    
+    # استخراج لید خبر از خطوط بعدی
+    lead = ""
+    if len(filtered_lines) > 1:
+        lead_candidates = [clean_text_line(l) for l in filtered_lines[1:] if len(clean_text_line(l)) > 15]
+        if lead_candidates:
+            lead = " ".join(lead_candidates)
+
     hashtags = select_smart_hashtags(raw_text)
     post_link = f"https://t.me/{CHANNEL}/{post_id}"
 
-    # هر لینک در X دقیقاً ۲۳ کاراکتر محاسبه می‌شود
-    base_len = len(emoji) + 1 + len(headline) + 2 + len(hashtags) + 2 + 23
-    available_for_body = 270 - base_len
+    # ساختار پایه لاکچری با فاصله‌گذاری دقیق بین تیتر و لید
+    header_part = f"{badge}\n\n«{headline}»"
+    footer_part = f"{hashtags}\n🔗 {post_link}"
 
-    if body and available_for_body > 35:
-        short_body = body[:available_for_body - 6].rsplit(" ", 1)[0] + "..."
-        tweet_text = f"{emoji} {headline}\n\n▫️ {short_body}\n\n{hashtags}\n{post_link}"
+    # در X هر لینک ۲۳ کاراکتر محاسبه می‌شود
+    fixed_len = len(header_part) + 4 + len( hashtags) + 4 + 23
+    available_for_lead = 272 - fixed_len
+
+    if lead and available_for_lead > 40:
+        if len(lead) > available_for_lead:
+            short_lead = lead[:available_for_lead - 5].rsplit(" ", 1)[0] + "…"
+        else:
+            short_lead = lead
+        tweet_text = f"{header_part}\n\n▪️ {short_lead}\n\n{footer_part}"
     else:
-        if base_len > 270:
-            max_head = 270 - (len(hashtags) + 30)
-            headline = headline[:max_head].rsplit(" ", 1)[0] + "..."
-        tweet_text = f"{emoji} {headline}\n\n{hashtags}\n{post_link}"
+        # اگر تیتر خیلی طولانی بود، آن را به تیتر و لید تقسیم یا خلاصه کن
+        if fixed_len > 272:
+            max_head = 272 - (len(badge) + len(hashtags) + 38)
+            headline = headline[:max_head].rsplit(" ", 1)[0] + "…"
+            header_part = f"{badge}\n\n«{headline}»"
+        tweet_text = f"{header_part}\n\n{footer_part}"
 
     return tweet_text
 
 def fetch_latest_telegram_posts():
     url = f"https://t.me/s/{CHANNEL}"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    resp = requests.get(url, headers=headers, timeout=20)
+    resp = requests.get(url, headers=headers, timeout=15)
     soup = BeautifulSoup(resp.text, "html.parser")
     
     posts = []
@@ -118,17 +152,15 @@ def post_with_real_browser(tweet_text, photo_url=None):
     image_path = None
     if photo_url:
         try:
-            img_data = requests.get(photo_url, timeout=15).content
+            img_data = requests.get(photo_url, timeout=10).content
             image_path = os.path.abspath("temp_news.jpg")
             with open(image_path, "wb") as f:
                 f.write(img_data)
-            print("تصویر خبر با موفقیت دانلود شد.")
         except Exception as e:
             print(f"خطا در دانلود تصویر خبر: {e}")
             image_path = None
 
     with sync_playwright() as p:
-        # راه‌اندازی مرورگر کروم با غیرفعال کردن فلگ‌های تشخیص ربات کلودفلر
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -143,11 +175,8 @@ def post_with_real_browser(tweet_text, photo_url=None):
             viewport={"width": 1280, "height": 800},
             locale="en-US"
         )
-
-        # حذف ردپای WebDriver برای عبور کامل از کلودفلر
         context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-        # تزریق کوکی‌های معتبر روی هر دو دامنه x.com و twitter.com
         cookies = []
         for domain in [".x.com", ".twitter.com"]:
             cookies.extend([
@@ -157,42 +186,29 @@ def post_with_real_browser(tweet_text, photo_url=None):
         context.add_cookies(cookies)
 
         page = context.new_page()
-        print("در حال باز کردن صفحه ارسال پست در X...")
-        page.goto("https://x.com/compose/post", wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(5000)
+        page.goto("https://x.com/compose/post", wait_until="domcontentloaded", timeout=45000)
 
-        # بررسی لاگین بودن
-        if "login" in page.url.lower():
-            raise RuntimeError("کوکی‌های X_AUTH_TOKEN یا X_CT0 منقضی یا اشتباه هستند (هدایت به صفحه لاگین).")
-
-        # انتظار برای ظاهر شدن کادر متن توییت
         textbox = page.locator('[data-testid="tweetTextarea_0"]').first
-        textbox.wait_for(state="visible", timeout=30000)
+        textbox.wait_for(state="visible", timeout=25000)
         textbox.click()
-        page.wait_for_timeout(1000)
 
-        # آپلود تصویر در صورت وجود
         if image_path and os.path.exists(image_path):
             try:
                 file_input = page.locator('input[data-testid="fileInput"]').first
                 file_input.set_input_files(image_path)
-                print("تصویر داخل ادیتور X بارگذاری شد. انتظار برای پردازش...")
-                page.wait_for_timeout(6000)
+                page.wait_for_timeout(3500)
             except Exception as e:
                 print(f"ادامه بدون پیوست فایل تصویر: {e}")
 
-        # وارد کردن متن خبر
         textbox.fill(tweet_text)
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(1000)
 
-        # کلیک روی دکمه ارسال (Post)
         post_button = page.locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]').first
-        post_button.wait_for(state="visible", timeout=15000)
+        post_button.wait_for(state="visible", timeout=10000)
         post_button.click()
 
-        # انتظار برای ثبت نهایی در سرور X
-        page.wait_for_timeout(6000)
-        print("✅ خبر با موفقیت کامل در شبکه اجتماعی X منتشر شد!")
+        page.wait_for_timeout(3500)
+        print("✅ خبر با فرمت لاکچری در X منتشر شد!")
         browser.close()
 
 def main():
@@ -200,26 +216,23 @@ def main():
     posts = fetch_latest_telegram_posts()
     
     if not posts:
-        print("هیچ پستی از صفحه وب تلگرام دریافت نشد.")
         return
+
+    if not history:
+        for p in posts[:-1]:
+            history.append(p["id"])
 
     new_posts = [p for p in posts if p["id"] not in history]
     if not new_posts:
-        print("همه اخبار فعلی قبلاً در X منتشر شده‌اند.")
+        print("خبر جدیدی وجود ندارد.")
         return
 
-    target_post = new_posts[-1]
-    tweet_text = format_for_x(target_post["text"], target_post["id"])
-    if not tweet_text:
-        return
-
-    post_with_real_browser(tweet_text, target_post["photo_url"])
-
-    # ذخیره در تاریخچه برای جلوگیری از تکرار
-    for p in new_posts:
-        if p["id"] not in history:
-            history.append(p["id"])
-    save_history(history)
+    for target_post in new_posts[:2]:
+        tweet_text = format_for_x(target_post["text"], target_post["id"])
+        if tweet_text:
+            post_with_real_browser(tweet_text, target_post["photo_url"])
+        history.append(target_post["id"])
+        save_history(history)
 
 if __name__ == "__main__":
     main()
