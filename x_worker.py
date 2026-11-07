@@ -1,17 +1,12 @@
 import os
 import re
 import json
+import time
 import requests
 from bs4 import BeautifulSoup
-from curl_cffi import requests as cffi_requests
-import tweepy
+from playwright.sync_api import sync_playwright
 
-# خواندن تمامی کلیدها و کوکی‌ها از GitHub Secrets
-API_KEY = os.environ.get("X_API_KEY", "").strip()
-API_SECRET = os.environ.get("X_API_SECRET", "").strip()
-ACCESS_TOKEN = os.environ.get("X_ACCESS_TOKEN", "").strip()
-ACCESS_SECRET = os.environ.get("X_ACCESS_SECRET", "").strip()
-
+# خواندن کوکی‌ها از GitHub Secrets
 X_AUTH_TOKEN = os.environ.get("X_AUTH_TOKEN", "").strip()
 X_CT0 = os.environ.get("X_CT0", "").strip()
 CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "shirazlastnews").strip()
@@ -74,14 +69,14 @@ def format_for_x(raw_text, post_id):
 
     # هر لینک در X دقیقاً ۲۳ کاراکتر محاسبه می‌شود
     base_len = len(emoji) + 1 + len(headline) + 2 + len(hashtags) + 2 + 23
-    available_for_body = 275 - base_len
+    available_for_body = 270 - base_len
 
     if body and available_for_body > 35:
         short_body = body[:available_for_body - 6].rsplit(" ", 1)[0] + "..."
         tweet_text = f"{emoji} {headline}\n\n▫️ {short_body}\n\n{hashtags}\n{post_link}"
     else:
-        if base_len > 275:
-            max_head = 275 - (len(hashtags) + 30)
+        if base_len > 270:
+            max_head = 270 - (len(hashtags) + 30)
             headline = headline[:max_head].rsplit(" ", 1)[0] + "..."
         tweet_text = f"{emoji} {headline}\n\n{hashtags}\n{post_link}"
 
@@ -116,101 +111,89 @@ def fetch_latest_telegram_posts():
         })
     return posts
 
-def post_via_browser_impersonation(tweet_text, photo_url=None):
-    """ارسال مستقیم با شبیه‌سازی مرورگر کروم واقعی برای دور زدن محدودیت ۴۰۲ و کلودفلر"""
+def post_with_real_browser(tweet_text, photo_url=None):
     if not X_AUTH_TOKEN or not X_CT0:
-        raise RuntimeError("کوکی‌های X_AUTH_TOKEN و X_CT0 در بخش Secrets تنظیم نشده‌اند.")
+        raise RuntimeError("مقادیر X_AUTH_TOKEN و X_CT0 در GitHub Secrets خالی هستند!")
 
-    session = cffi_requests.Session(impersonate="chrome120")
-    cookies = {"auth_token": X_AUTH_TOKEN, "ct0": X_CT0}
-    
-    # توکن عمومی استاندارد وب‌اپلیکیشن X
-    bearer = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
-    headers = {
-        "authorization": f"Bearer {bearer}",
-        "x-csrf-token": X_CT0,
-        "x-twitter-active-user": "yes",
-        "x-twitter-auth-type": "OAuth2Session",
-        "x-twitter-client-language": "fa",
-        "content-type": "application/json",
-        "origin": "https://x.com",
-        "referer": "https://x.com/compose/post"
-    }
-
-    media_entities = []
+    image_path = None
     if photo_url:
         try:
-            img_bytes = requests.get(photo_url, timeout=15).content
-            upload_headers = {
-                "authorization": f"Bearer {bearer}",
-                "x-csrf-token": X_CT0,
-                "x-twitter-auth-type": "OAuth2Session",
-                "origin": "https://x.com",
-                "referer": "https://x.com/"
-            }
-            up_resp = session.post(
-                "https://upload.twitter.com/1.1/media/upload.json",
-                headers=upload_headers,
-                cookies=cookies,
-                files={"media": ("news.jpg", img_bytes, "image/jpeg")},
-                timeout=30
-            )
-            if up_resp.status_code == 200:
-                media_id = up_resp.json().get("media_id_string")
-                if media_id:
-                    media_entities.append({"media_id": media_id, "tagged_users": []})
-                    print(f"تصویر با موفقیت آپلود شد: {media_id}")
+            img_data = requests.get(photo_url, timeout=15).content
+            image_path = os.path.abspath("temp_news.jpg")
+            with open(image_path, "wb") as f:
+                f.write(img_data)
+            print("تصویر خبر با موفقیت دانلود شد.")
         except Exception as e:
-            print(f"ادامه ارسال بدون تصویر مجزا (نمایش از طریق کارت لینک): {e}")
+            print(f"خطا در دانلود تصویر خبر: {e}")
+            image_path = None
 
-    # دریافت خودکار GraphQL QueryId یا استفاده از مقدار پایدار CreateTweet
-    query_id = "xT36w0XM6A8jDyn-ram2Aw"
-    url = f"https://x.com/i/api/graphql/{query_id}/CreateTweet"
+    with sync_playwright() as p:
+        # راه‌اندازی مرورگر کروم با غیرفعال کردن فلگ‌های تشخیص ربات کلودفلر
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage"
+            ]
+        )
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800},
+            locale="en-US"
+        )
 
-    payload = {
-        "variables": {
-            "tweet_text": tweet_text,
-            "dark_request": False,
-            "media": {
-                "media_entities": media_entities,
-                "possibly_sensitive": False
-            },
-            "semantic_annotation_ids": []
-        },
-        "features": {
-            "communities_web_enable_tweet_community_results_fetch": True,
-            "c9s_tweet_anatomy_moderator_badge_enabled": True,
-            "tweetypie_unmention_optimization_enabled": True,
-            "responsive_web_edit_tweet_api_enabled": True,
-            "graphql_is_translatable_rweb_tweet_is_translatable_enabled": True,
-            "view_counts_everywhere_api_enabled": True,
-            "longform_notetweets_consumption_enabled": True,
-            "responsive_web_twitter_article_tweet_consumption_enabled": True,
-            "tweet_awards_web_tipping_enabled": False,
-            "creator_subscriptions_quote_tweet_preview_enabled": False,
-            "longform_notetweets_rich_text_read_enabled": True,
-            "longform_notetweets_inline_media_enabled": True,
-            "articles_preview_enabled": True,
-            "rweb_video_timestamps_enabled": True,
-            "rweb_tipjar_consumption_enabled": True,
-            "responsive_web_graphql_exclude_directive_enabled": True,
-            "verified_phone_label_enabled": False,
-            "freedom_of_speech_not_reach_fetch_enabled": True,
-            "standardized_nudges_misinfo": True,
-            "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": True,
-            "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
-            "responsive_web_graphql_timeline_navigation_enabled": True,
-            "responsive_web_enhance_cards_enabled": False
-        },
-        "queryId": query_id
-    }
+        # حذف ردپای WebDriver برای عبور کامل از کلودفلر
+        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-    resp = session.post(url, headers=headers, cookies=cookies, json=payload, timeout=30)
-    if resp.status_code == 200 and "errors" not in resp.json():
-        print("✅ پست با موفقیت از طریق شبیه‌ساز مرورگر کروم در X منتشر شد!")
-        return True
-    else:
-        raise RuntimeError(f"پاسخ سرور X ({resp.status_code}): {resp.text[:300]}")
+        # تزریق کوکی‌های معتبر روی هر دو دامنه x.com و twitter.com
+        cookies = []
+        for domain in [".x.com", ".twitter.com"]:
+            cookies.extend([
+                {"name": "auth_token", "value": X_AUTH_TOKEN, "domain": domain, "path": "/", "secure": True, "httpOnly": True, "sameSite": "None"},
+                {"name": "ct0", "value": X_CT0, "domain": domain, "path": "/", "secure": True, "httpOnly": False, "sameSite": "Lax"}
+            ])
+        context.add_cookies(cookies)
+
+        page = context.new_page()
+        print("در حال باز کردن صفحه ارسال پست در X...")
+        page.goto("https://x.com/compose/post", wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(5000)
+
+        # بررسی لاگین بودن
+        if "login" in page.url.lower():
+            raise RuntimeError("کوکی‌های X_AUTH_TOKEN یا X_CT0 منقضی یا اشتباه هستند (هدایت به صفحه لاگین).")
+
+        # انتظار برای ظاهر شدن کادر متن توییت
+        textbox = page.locator('[data-testid="tweetTextarea_0"]').first
+        textbox.wait_for(state="visible", timeout=30000)
+        textbox.click()
+        page.wait_for_timeout(1000)
+
+        # آپلود تصویر در صورت وجود
+        if image_path and os.path.exists(image_path):
+            try:
+                file_input = page.locator('input[data-testid="fileInput"]').first
+                file_input.set_input_files(image_path)
+                print("تصویر داخل ادیتور X بارگذاری شد. انتظار برای پردازش...")
+                page.wait_for_timeout(6000)
+            except Exception as e:
+                print(f"ادامه بدون پیوست فایل تصویر: {e}")
+
+        # وارد کردن متن خبر
+        textbox.fill(tweet_text)
+        page.wait_for_timeout(2000)
+
+        # کلیک روی دکمه ارسال (Post)
+        post_button = page.locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]').first
+        post_button.wait_for(state="visible", timeout=15000)
+        post_button.click()
+
+        # انتظار برای ثبت نهایی در سرور X
+        page.wait_for_timeout(6000)
+        print("✅ خبر با موفقیت کامل در شبکه اجتماعی X منتشر شد!")
+        browser.close()
 
 def main():
     history = load_history()
@@ -230,29 +213,9 @@ def main():
     if not tweet_text:
         return
 
-    published = False
+    post_with_real_browser(tweet_text, target_post["photo_url"])
 
-    # موتور اول: تلاش با API رسمی (بدون آپلود مدیای پولی که باعث خطای 402 می‌شد)
-    if API_KEY and API_SECRET and ACCESS_TOKEN and ACCESS_SECRET:
-        try:
-            print("تلاش برای ارسال با API رسمی v2...")
-            client_v2 = tweepy.Client(
-                consumer_key=API_KEY,
-                consumer_secret=API_SECRET,
-                access_token=ACCESS_TOKEN,
-                access_token_secret=ACCESS_SECRET
-            )
-            res = client_v2.create_tweet(text=tweet_text)
-            print(f"✅ منتشر شد (API رسمی)! Tweet ID: {res.data['id']}")
-            published = True
-        except Exception as e:
-            print(f"⚠️ API رسمی نیاز به پلن پولی داشت ({e}). تغییر خودکار به موتور شبیه‌ساز مرورگر...")
-
-    # موتور دوم: ارسال رایگان با شبیه‌ساز مرورگر کروم (دور زدن خطای 402 و کلودفلر)
-    if not published:
-        post_via_browser_impersonation(tweet_text, target_post["photo_url"])
-
-    # ثبت در تاریخچه برای جلوگیری از ارسال تکراری
+    # ذخیره در تاریخچه برای جلوگیری از تکرار
     for p in new_posts:
         if p["id"] not in history:
             history.append(p["id"])
