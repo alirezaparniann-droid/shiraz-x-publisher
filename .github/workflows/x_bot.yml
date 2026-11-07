@@ -4,6 +4,7 @@ on:
   schedule:
     - cron: '*/10 * * * *'
   workflow_dispatch:
+  repository_dispatch:
 
 permissions:
   contents: write
@@ -26,7 +27,7 @@ jobs:
           pip install playwright requests beautifulsoup4
           playwright install --with-deps chromium
 
-      - name: Run X Publisher Script
+      - name: Run X Publisher Script (Text, Photo & Video)
         env:
           X_AUTH_TOKEN: ${{ secrets.X_AUTH_TOKEN }}
           X_CT0: ${{ secrets.X_CT0 }}
@@ -34,7 +35,23 @@ jobs:
         run: |
           python x_worker.py
 
-      - name: Run Nightly Telegram Report (12 AM Iran Time or Manual Test)
+      - name: Run Nightly X Summary at 11 PM Iran Time (Item 32)
+        if: always()
+        env:
+          X_AUTH_TOKEN: ${{ secrets.X_AUTH_TOKEN }}
+          X_CT0: ${{ secrets.X_CT0 }}
+          TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
+        run: |
+          HOUR_UTC=$(date -u +%H)
+          MIN_UTC=$(date -u +%M)
+          # ساعت 19:25 تا 19:38 جهانی معادل ساعت 22:55 تا 23:08 شب به وقت ایران است
+          if [ "$HOUR_UTC" = "19" ] && [ "$MIN_UTC" -ge 25 ] && [ "$MIN_UTC" -le 38 ]; then
+            if [ -f nightly_x_thread.py ]; then
+              python nightly_x_thread.py
+            fi
+          fi
+
+      - name: Run Nightly Telegram Report at 12 AM Iran Time (Item 33)
         if: always()
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -42,7 +59,6 @@ jobs:
         run: |
           HOUR_UTC=$(date -u +%H)
           MIN_UTC=$(date -u +%M)
-          # ساعت 20:20 تا 20:35 به وقت جهانی معادل ساعت 23:50 تا 00:05 شب به وقت ایران است
           if [ "$EVENT_NAME" = "workflow_dispatch" ] || ( [ "$HOUR_UTC" = "20" ] && [ "$MIN_UTC" -ge 20 ] && [ "$MIN_UTC" -le 35 ] ); then
             if [ -f nightly_report.py ]; then
               python nightly_report.py
