@@ -12,15 +12,6 @@ EVENT_NAME = os.environ.get("GITHUB_EVENT_NAME", "")
 
 HISTORY_FILE = "posted_x_ids.json"
 
-TAG_RULES = {
-    "فوتبال|فجر|سپاسی|لیگ|ورزش|استقلال|پرسپولیس|ورزشگاه|پارس": ["#فجر_سپاسی", "#ورزش_فارس"],
-    "حادثه|آتش|تصادف|اورژانس|پلیس|بازداشت|قتل|سرقت|انفجار": ["#حوادث_شیراز", "#خبر_فوری"],
-    "شهرداری|مترو|ترافیک|شورای_شهر|عمران|خیابان|پل|بزرگراه": ["#شهرداری_شیراز", "#کلانشهر_شیراز"],
-    "هواشناسی|باران|برف|آلودگی|دما|سد|آب|برق": ["#هواشناسی_فارس", "#وضعیت_هوا"],
-    "طلا|سکه|دلار|تورم|بازار|قیمت|اقتصاد|مسکن": ["#اقتصاد", "#بازار_شیراز"],
-    "حافظیه|سعدی|تخت_جمشید|گردشگری|مسافر|میراث|کافه": ["#شیرازگردی", "#گردشگری"]
-}
-
 def load_history():
     if os.path.exists(HISTORY_FILE):
         try:
@@ -52,18 +43,9 @@ def detect_category_icon(text):
         return "🌤"
     return "📌"
 
-def select_smart_hashtags(text):
-    tags = ["#شیراز", "#اخبار_شیراز"]
-    for pattern, pattern_tags in TAG_RULES.items():
-        if re.search(pattern, text):
-            for t in pattern_tags:
-                if t not in tags:
-                    tags.append(t)
-    return " ".join(tags[:4])
-
-def build_tweet_parts(raw_text, post_id):
+def format_for_x(raw_text):
     """
-    بازگرداندن لیست توییت‌ها (۱ یا ۲ بخش) تا تیتر و لید خبر ۱۰۰٪ کامل و بدون بریدگی منتشر شوند.
+    فرمت اختصاصی: فقط تیتر + یک خط فاصله + لید کامل خبر
     """
     lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
     filtered_lines = [
@@ -78,12 +60,12 @@ def build_tweet_parts(raw_text, post_id):
     ]
 
     if not filtered_lines:
-        return []
+        return None
 
     icon = detect_category_icon(raw_text)
     headline = clean_text_line(filtered_lines[0])
 
-    # استخراج لید کامل خبر (اولین پاراگراف پس از تیتر)
+    # پیدا کردن لید خبر (اولین خط کامل بعد از تیتر)
     lead = ""
     for l in filtered_lines[1:]:
         cleaned = clean_text_line(l)
@@ -91,46 +73,28 @@ def build_tweet_parts(raw_text, post_id):
             lead = cleaned
             break
 
-    hashtags = select_smart_hashtags(raw_text)
-    post_link = f"https://t.me/{CHANNEL}/{post_id}"
-
-    # قالب اصلی: فقط تیتر + یک خط فاصله + لید کامل
     header = f"{icon} «{headline}»"
 
     if not lead:
-        # اگر خبر فقط تیتر داشت
-        full_single = f"{header}\n\n#شیراز #اخبار_شیراز"
-        second_tweet = f"🔗 مشروح خبر در کانال تلگرام آخرین خبرهای شیراز:\n{post_link}\n\n{hashtags}"
-        return [full_single[:275], second_tweet]
+        return f"{header}\n\n#شیراز #اخبار_شیراز"[:275]
 
-    # ترکیب تیتر و لید کامل
     combined = f"{header}\n\n▪️ {lead}"
 
-    # حالت اول: تیتر و لید کامل به راحتی در یک توییت (زیر ۲۵۰ کاراکتر) جا می‌شوند
-    if len(combined) <= 248:
-        first_tweet = f"{combined}\n\n#شیراز #اخبار_شیراز"
-        second_tweet = f"🔗 جزئیات بیشتر در کانال تلگرام آخرین خبرهای شیراز:\n{post_link}\n\n{hashtags}"
-        return [first_tweet, second_tweet]
+    # اگر تیتر و لید کامل جا می‌شود و فضای کافی برای دو هشتگ هم هست:
+    if len(combined) <= 250:
+        return f"{combined}\n\n#شیراز #اخبار_شیراز"
 
-    # حالت دوم: تیتر و لید کامل بین ۲۵۰ تا ۲۷۵ کاراکتر هستند (بدون هشتگ در توییت اول تا لید کامل بماند)
-    if len(combined) <= 275:
-        first_tweet = combined
-        second_tweet = f"🔗 جزئیات کامل خبر در تلگرام:\n{post_link}\n\n{hashtags}"
-        return [first_tweet, second_tweet]
+    # اگر تیتر و لید کامل تا ۲۷۸ کاراکتر جا می‌شود، کل ظرفیت را به تیتر و لید بده (بدون هشتگ تا لید کامل بماند)
+    if len(combined) <= 278:
+        return combined
 
-    # حالت سوم: تیتر + لید طولانی‌تر از ۲۷۵ کاراکتر است -> تقسیم هوشمند در دو توییت متوالی بدون حذف هیچ کلمه‌ای
-    available_in_first = 270 - len(header) - 6
-    if available_in_first > 60:
-        split_lead_1 = lead[:available_in_first].rsplit(" ", 1)[0]
-        split_lead_2 = lead[len(split_lead_1):].strip()
-        first_tweet = f"{header}\n\n▪️ {split_lead_1} (۱/۲)"
-        second_tweet = f"▫️ ادامه: {split_lead_2} (۲/۲)\n\n{hashtags}\n🔗 {post_link}"
-        return [first_tweet, second_tweet[:275]]
-    else:
-        # اگر خود تیتر خیلی بلند بود، تیتر در توییت اول و لید کامل در توییت دوم قرار می‌گیرد
-        first_tweet = f"{header}"
-        second_tweet = f"▪️ {lead[:200]}\n\n{hashtags}\n🔗 {post_link}"
-        return [first_tweet[:275], second_tweet[:275]]
+    # اگر مجموع تیتر و لید از ۲۷۸ کاراکتر بیشتر بود، تا آخرین کلمه ممکن از لید را حفظ کن
+    available_for_lead = 274 - len(header) - 6
+    if available_for_lead > 30:
+        full_possible_lead = lead[:available_for_lead].rsplit(" ", 1)[0] + "…"
+        return f"{header}\n\n▪️ {full_possible_lead}"
+
+    return header[:275]
 
 def fetch_latest_telegram_posts():
     url = f"https://t.me/s/{CHANNEL}"
@@ -161,7 +125,7 @@ def fetch_latest_telegram_posts():
         })
     return posts
 
-def post_with_real_browser(tweet_parts, photo_url=None):
+def post_with_real_browser(tweet_text, photo_url=None):
     if not X_AUTH_TOKEN or not X_CT0:
         raise RuntimeError("مقادیر X_AUTH_TOKEN و X_CT0 در GitHub Secrets خالی هستند!")
 
@@ -210,10 +174,9 @@ def post_with_real_browser(tweet_parts, photo_url=None):
         if "login" in page.url.lower():
             raise RuntimeError("کوکی‌های X منقضی یا اشتباه هستند.")
 
-        # کادر توییت اول (تیتر + لید کامل)
-        textbox_0 = page.locator('[data-testid="tweetTextarea_0"]').first
-        textbox_0.wait_for(state="visible", timeout=30000)
-        textbox_0.click()
+        textbox = page.locator('[data-testid="tweetTextarea_0"]').first
+        textbox.wait_for(state="visible", timeout=30000)
+        textbox.click()
         page.wait_for_timeout(1000)
 
         if image_path and os.path.exists(image_path):
@@ -225,30 +188,26 @@ def post_with_real_browser(tweet_parts, photo_url=None):
             except Exception as e:
                 print(f"ادامه بدون پیوست فایل تصویر: {e}")
 
-        textbox_0.fill(tweet_parts[0])
+        # وارد کردن متن و اضافه کردن یک فاصله در انتها برای بسته شدن منوی هشتگ
+        textbox.fill(tweet_text + " ")
         page.wait_for_timeout(1500)
 
-        # اگر بخش دوم (لینک و ادامه/هشتگ‌ها) وجود داشت، دکمه + (افزودن به رشته‌توییت) را بزن
-        if len(tweet_parts) > 1 and tweet_parts[1]:
-            try:
-                add_thread_btn = page.locator('[data-testid="addButton"]').first
-                if add_thread_btn.is_visible():
-                    add_thread_btn.click()
-                    page.wait_for_timeout(1500)
-                    textbox_1 = page.locator('[data-testid="tweetTextarea_1"]').first
-                    textbox_1.wait_for(state="visible", timeout=10000)
-                    textbox_1.fill(tweet_parts[1])
-                    page.wait_for_timeout(1500)
-                    print("توییت دوم (مکمل و لینک) به رشته‌توییت اضافه شد.")
-            except Exception as e:
-                print(f"ارسال به صورت تک‌توییت (عدم افزودن بخش دوم): {e}")
+        # بستن هرگونه پاپ‌آپ یا منوی پیشنهادی هشتگ که روی دکمه Post را می‌پوشاند
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
 
+        # روش ۱: کلیک مستقیم جاوااسکریپتی که از تمام لایه‌های مزاحم عبور می‌کند
         post_button = page.locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]').first
-        post_button.wait_for(state="visible", timeout=15000)
-        post_button.click()
+        if post_button.count() > 0:
+            post_button.evaluate("el => el.click()")
+            print("دستور ارسال از طریق جاوااسکریپت اجرا شد.")
+        else:
+            # روش ۲: شورتکات رسمی ارسال پست در X
+            page.keyboard.press("Control+Enter")
+            print("دستور ارسال با شورتکات کیبورد اجرا شد.")
 
         page.wait_for_timeout(6000)
-        print("✅ تیتر و لید کامل خبر با موفقیت در X منتشر شد!")
+        print("✅ تیتر و لید خبر با موفقیت در X منتشر شد!")
         browser.close()
 
 def main():
@@ -263,7 +222,7 @@ def main():
 
     if not new_posts:
         if EVENT_NAME == "workflow_dispatch":
-            print("اجرای دستی: ارسال آخرین خبر با تیتر و لید کامل...")
+            print("اجرای دستی: ارسال آخرین خبر برای تست...")
             target_post = posts[-1]
         else:
             print("همه اخبار فعلی قبلاً در X منتشر شده‌اند.")
@@ -271,11 +230,11 @@ def main():
     else:
         target_post = new_posts[-1]
 
-    tweet_parts = build_tweet_parts(target_post["text"], target_post["id"])
-    if not tweet_parts:
+    tweet_text = format_for_x(target_post["text"])
+    if not tweet_text:
         return
 
-    post_with_real_browser(tweet_parts, target_post["photo_url"])
+    post_with_real_browser(tweet_text, target_post["photo_url"])
 
     for p in posts:
         if p["id"] not in history:
