@@ -19,23 +19,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
-      - name: Cache Playwright Browser
-        id: playwright-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-chromium
-
-      - name: Install Dependencies
+      - name: Install Real Browser and Dependencies
         run: |
+          pip install --upgrade pip
           pip install playwright requests beautifulsoup4
-          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" != "true" ]; then
-            playwright install --with-deps chromium
-          else
-            playwright install-deps chromium
-          fi
+          playwright install --with-deps chromium
 
       - name: Run X Publisher Script
         env:
