@@ -1,0 +1,43 @@
+name: Shiraz X 24/7 Publisher
+
+on:
+  schedule:
+    - cron: '*/30 * * * *' # اجرا در هر ۳۰ دقیقه به صورت ۲۴ ساعته
+  workflow_dispatch: # دکمه اجرای دستی برای تست
+
+permissions:
+  contents: write
+
+jobs:
+  publish_to_x:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          pip install tweepy requests beautifulsoup4
+
+      - name: Run X Publisher Script
+        env:
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
+        run: |
+          python x_worker.py
+
+      - name: Save Posted IDs History
+        run: |
+          git config --global user.name "ShirazXBot"
+          git config --global user.email "bot@shirazlastnews.com"
+          git add posted_x_ids.json || true
+          git diff --staged --quiet || git commit -m "Update posted X history [skip ci]"
+          git push
