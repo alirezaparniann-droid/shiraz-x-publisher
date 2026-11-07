@@ -20,17 +20,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Dependencies
+      - name: Install Real Browser and Dependencies
         run: |
           pip install --upgrade pip
-          pip install tweepy requests beautifulsoup4 curl_cffi
+          pip install playwright requests beautifulsoup4
+          playwright install --with-deps chromium
 
       - name: Run X Publisher Script
         env:
-          X_API_KEY: ${{ secrets.X_API_KEY }}
-          X_API_SECRET: ${{ secrets.X_API_SECRET }}
-          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
-          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_AUTH_TOKEN: ${{ secrets.X_AUTH_TOKEN }}
           X_CT0: ${{ secrets.X_CT0 }}
           TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
@@ -38,6 +35,7 @@ jobs:
           python x_worker.py
 
       - name: Save Posted IDs History
+        if: always()
         run: |
           git config --global user.name "ShirazXBot"
           git config --global user.email "bot@shirazlastnews.com"
