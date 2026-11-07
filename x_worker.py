@@ -1,18 +1,24 @@
 import os
 import re
 import json
-import asyncio
 import requests
 from bs4 import BeautifulSoup
-from twikit import Client
+from curl_cffi import requests as cffi_requests
+import tweepy
 
-# خواندن کوکی‌های رایگان X از GitHub Secrets
+# خواندن تمامی کلیدها و کوکی‌ها از GitHub Secrets
+API_KEY = os.environ.get("X_API_KEY", "").strip()
+API_SECRET = os.environ.get("X_API_SECRET", "").strip()
+ACCESS_TOKEN = os.environ.get("X_ACCESS_TOKEN", "").strip()
+ACCESS_SECRET = os.environ.get("X_ACCESS_SECRET", "").strip()
+
 X_AUTH_TOKEN = os.environ.get("X_AUTH_TOKEN", "").strip()
 X_CT0 = os.environ.get("X_CT0", "").strip()
 CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "shirazlastnews").strip()
 
 HISTORY_FILE = "posted_x_ids.json"
 
+# بانک جامع هشتگ‌های ترند شیراز و ایران در X
 TAG_RULES = {
     "فوتبال|فجر|سپاسی|لیگ|ورزش|استقلال|پرسپولیس|ورزشگاه|پارس": ["#فجر_سپاسی", "#فوتبال", "#ورزش_فارس"],
     "حادثه|آتش|تصادف|اورژانس|پلیس|بازداشت|قتل|سرقت|انفجار": ["#حوادث", "#خبر_فوری", "#حوادث_شیراز"],
@@ -53,7 +59,7 @@ def detect_category_emoji(text):
         return "🌤"
     return "📌"
 
-def format_for_x(raw_text):
+def format_for_x(raw_text, post_id):
     lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
     clean_lines = [l for l in lines if not ("t.me/" in l or "@" in l or "shirazlastnews" in l.lower())]
     
@@ -64,24 +70,26 @@ def format_for_x(raw_text):
     headline = clean_lines[0]
     body = " ".join(clean_lines[1:]) if len(clean_lines) > 1 else ""
     hashtags = select_smart_hashtags(raw_text)
+    post_link = f"https://t.me/{CHANNEL}/{post_id}"
 
-    base_structure = f"{emoji} {headline}\n\n{hashtags}"
-    available_chars = 270 - len(base_structure)
+    # هر لینک در X دقیقاً ۲۳ کاراکتر محاسبه می‌شود
+    base_len = len(emoji) + 1 + len(headline) + 2 + len(hashtags) + 2 + 23
+    available_for_body = 275 - base_len
 
-    if body and available_chars > 35:
-        short_body = body[:available_chars - 3].rsplit(" ", 1)[0] + "..."
-        tweet_text = f"{emoji} {headline}\n\n▫️ {short_body}\n\n{hashtags}"
+    if body and available_for_body > 35:
+        short_body = body[:available_for_body - 6].rsplit(" ", 1)[0] + "..."
+        tweet_text = f"{emoji} {headline}\n\n▫️ {short_body}\n\n{hashtags}\n{post_link}"
     else:
-        if len(base_structure) > 275:
-            max_head = 270 - len(hashtags) - 5
+        if base_len > 275:
+            max_head = 275 - (len(hashtags) + 30)
             headline = headline[:max_head].rsplit(" ", 1)[0] + "..."
-        tweet_text = f"{emoji} {headline}\n\n{hashtags}"
+        tweet_text = f"{emoji} {headline}\n\n{hashtags}\n{post_link}"
 
     return tweet_text
 
 def fetch_latest_telegram_posts():
     url = f"https://t.me/s/{CHANNEL}"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     resp = requests.get(url, headers=headers, timeout=20)
     soup = BeautifulSoup(resp.text, "html.parser")
     
@@ -108,63 +116,147 @@ def fetch_latest_telegram_posts():
         })
     return posts
 
-async def main():
+def post_via_browser_impersonation(tweet_text, photo_url=None):
+    """ارسال مستقیم با شبیه‌سازی مرورگر کروم واقعی برای دور زدن محدودیت ۴۰۲ و کلودفلر"""
     if not X_AUTH_TOKEN or not X_CT0:
-        raise ValueError("کوکی‌های X_AUTH_TOKEN و X_CT0 در GitHub Secrets وارد نشده‌اند!")
+        raise RuntimeError("کوکی‌های X_AUTH_TOKEN و X_CT0 در بخش Secrets تنظیم نشده‌اند.")
 
+    session = cffi_requests.Session(impersonate="chrome120")
+    cookies = {"auth_token": X_AUTH_TOKEN, "ct0": X_CT0}
+    
+    # توکن عمومی استاندارد وب‌اپلیکیشن X
+    bearer = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+    headers = {
+        "authorization": f"Bearer {bearer}",
+        "x-csrf-token": X_CT0,
+        "x-twitter-active-user": "yes",
+        "x-twitter-auth-type": "OAuth2Session",
+        "x-twitter-client-language": "fa",
+        "content-type": "application/json",
+        "origin": "https://x.com",
+        "referer": "https://x.com/compose/post"
+    }
+
+    media_entities = []
+    if photo_url:
+        try:
+            img_bytes = requests.get(photo_url, timeout=15).content
+            upload_headers = {
+                "authorization": f"Bearer {bearer}",
+                "x-csrf-token": X_CT0,
+                "x-twitter-auth-type": "OAuth2Session",
+                "origin": "https://x.com",
+                "referer": "https://x.com/"
+            }
+            up_resp = session.post(
+                "https://upload.twitter.com/1.1/media/upload.json",
+                headers=upload_headers,
+                cookies=cookies,
+                files={"media": ("news.jpg", img_bytes, "image/jpeg")},
+                timeout=30
+            )
+            if up_resp.status_code == 200:
+                media_id = up_resp.json().get("media_id_string")
+                if media_id:
+                    media_entities.append({"media_id": media_id, "tagged_users": []})
+                    print(f"تصویر با موفقیت آپلود شد: {media_id}")
+        except Exception as e:
+            print(f"ادامه ارسال بدون تصویر مجزا (نمایش از طریق کارت لینک): {e}")
+
+    # دریافت خودکار GraphQL QueryId یا استفاده از مقدار پایدار CreateTweet
+    query_id = "xT36w0XM6A8jDyn-ram2Aw"
+    url = f"https://x.com/i/api/graphql/{query_id}/CreateTweet"
+
+    payload = {
+        "variables": {
+            "tweet_text": tweet_text,
+            "dark_request": False,
+            "media": {
+                "media_entities": media_entities,
+                "possibly_sensitive": False
+            },
+            "semantic_annotation_ids": []
+        },
+        "features": {
+            "communities_web_enable_tweet_community_results_fetch": True,
+            "c9s_tweet_anatomy_moderator_badge_enabled": True,
+            "tweetypie_unmention_optimization_enabled": True,
+            "responsive_web_edit_tweet_api_enabled": True,
+            "graphql_is_translatable_rweb_tweet_is_translatable_enabled": True,
+            "view_counts_everywhere_api_enabled": True,
+            "longform_notetweets_consumption_enabled": True,
+            "responsive_web_twitter_article_tweet_consumption_enabled": True,
+            "tweet_awards_web_tipping_enabled": False,
+            "creator_subscriptions_quote_tweet_preview_enabled": False,
+            "longform_notetweets_rich_text_read_enabled": True,
+            "longform_notetweets_inline_media_enabled": True,
+            "articles_preview_enabled": True,
+            "rweb_video_timestamps_enabled": True,
+            "rweb_tipjar_consumption_enabled": True,
+            "responsive_web_graphql_exclude_directive_enabled": True,
+            "verified_phone_label_enabled": False,
+            "freedom_of_speech_not_reach_fetch_enabled": True,
+            "standardized_nudges_misinfo": True,
+            "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": True,
+            "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+            "responsive_web_graphql_timeline_navigation_enabled": True,
+            "responsive_web_enhance_cards_enabled": False
+        },
+        "queryId": query_id
+    }
+
+    resp = session.post(url, headers=headers, cookies=cookies, json=payload, timeout=30)
+    if resp.status_code == 200 and "errors" not in resp.json():
+        print("✅ پست با موفقیت از طریق شبیه‌ساز مرورگر کروم در X منتشر شد!")
+        return True
+    else:
+        raise RuntimeError(f"پاسخ سرور X ({resp.status_code}): {resp.text[:300]}")
+
+def main():
     history = load_history()
     posts = fetch_latest_telegram_posts()
     
+    if not posts:
+        print("هیچ پستی از صفحه وب تلگرام دریافت نشد.")
+        return
+
     new_posts = [p for p in posts if p["id"] not in history]
     if not new_posts:
-        print("هیچ خبر جدیدی برای انتشار در X وجود ندارد.")
+        print("همه اخبار فعلی قبلاً در X منتشر شده‌اند.")
         return
 
     target_post = new_posts[-1]
-    tweet_text = format_for_x(target_post["text"])
+    tweet_text = format_for_x(target_post["text"], target_post["id"])
     if not tweet_text:
         return
 
-    # اتصال مستقیم با کوکی مرورگر بدون نیاز به Developer API پولی
-    client = Client("en-US")
-    client.set_cookies({
-        "auth_token": X_AUTH_TOKEN,
-        "ct0": X_CT0
-    })
+    published = False
 
-    media_ids = []
-    if target_post["photo_url"]:
+    # موتور اول: تلاش با API رسمی (بدون آپلود مدیای پولی که باعث خطای 402 می‌شد)
+    if API_KEY and API_SECRET and ACCESS_TOKEN and ACCESS_SECRET:
         try:
-            img_data = requests.get(target_post["photo_url"], timeout=15).content
-            with open("temp_news.jpg", "wb") as f:
-                f.write(img_data)
-            media_id = await client.upload_media("temp_news.jpg")
-            media_ids = [media_id]
+            print("تلاش برای ارسال با API رسمی v2...")
+            client_v2 = tweepy.Client(
+                consumer_key=API_KEY,
+                consumer_secret=API_SECRET,
+                access_token=ACCESS_TOKEN,
+                access_token_secret=ACCESS_SECRET
+            )
+            res = client_v2.create_tweet(text=tweet_text)
+            print(f"✅ منتشر شد (API رسمی)! Tweet ID: {res.data['id']}")
+            published = True
         except Exception as e:
-            print(f"خطا در دانلود/آپلود تصویر: {e}")
+            print(f"⚠️ API رسمی نیاز به پلن پولی داشت ({e}). تغییر خودکار به موتور شبیه‌ساز مرورگر...")
 
-    # ۱. ارسال توییت اصلی
-    main_tweet = await client.create_tweet(
-        text=tweet_text,
-        media_ids=media_ids if media_ids else None
-    )
-    print(f"توییت اصلی با موفقیت منتشر شد! ID: {main_tweet.id}")
+    # موتور دوم: ارسال رایگان با شبیه‌ساز مرورگر کروم (دور زدن خطای 402 و کلودفلر)
+    if not published:
+        post_via_browser_impersonation(tweet_text, target_post["photo_url"])
 
-    # ۲. ارسال خودکار کامنت (Reply) حاوی لینک کانال تلگرام
-    await asyncio.sleep(3)
-    reply_text = (
-        f"🔗 جزئیات کامل و ویدیوهای بیشتر در کانال تلگرام آخرین خبرهای شیراز:\n"
-        f"https://t.me/{CHANNEL}/{target_post['id']}"
-    )
-    await client.create_tweet(
-        text=reply_text,
-        reply_to=main_tweet.id
-    )
-    print("کامنت لینک کانال با موفقیت زیر توییت ثبت شد.")
-
+    # ثبت در تاریخچه برای جلوگیری از ارسال تکراری
     for p in new_posts:
-        history.append(p["id"])
+        if p["id"] not in history:
+            history.append(p["id"])
     save_history(history)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
