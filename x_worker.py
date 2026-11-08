@@ -12,17 +12,88 @@ EVENT_NAME = os.environ.get("GITHUB_EVENT_NAME", "")
 
 HISTORY_FILE = "posted_x_ids.json"
 
-# بانک هشتگ‌های استاندارد و هدفمند متناسب با دستورالعمل X
-TAG_RULES = {
-    "اصابت|شلیک|موشک|پدافند|انفجار|سپاه|تنگه هرمز|ارتش|حمله": ["#شیراز", "#خبر_فوری"],
-    "ترافیک|مسدود|راهور|تصادف|دروازه قرآن|چمران|کمربندی": ["#شیراز", "#ترافیک"],
-    "حادثه|آتش|اورژانس|پلیس|بازداشت|قتل|سرقت|زلزله|سیل": ["#شیراز", "#حوادث"],
-    "فوتبال|فجر|سپاسی|لیگ|ورزش|استقلال|پرسپولیس|ورزشگاه": ["#شیراز", "#فجر_سپاسی"],
-    "شهرداری|مترو|شورای_شهر|عمران|خیابان|پل|بزرگراه": ["#شیراز", "#شهرداری_شیراز"],
-    "هواشناسی|باران|برف|آلودگی|دما|سد|آب|برق": ["#شیراز", "#هواشناسی"],
-    "طلا|سکه|دلار|تورم|بازار|قیمت|اقتصاد|مسکن": ["#شیراز", "#اقتصاد"],
-    "حافظیه|سعدی|تخت_جمشید|گردشگری|مسافر|میراث": ["#شیراز", "#شیرازگردی"]
+# ۱. بانک کلمات کلیدی مستقیم که در صورت وجود در متن، مستقیماً هشتگ می‌شوند
+DIRECT_ENTITY_TAGS = {
+    "فجر سپاسی|فجرسپاسی|فجر شهید سپاسی": "#فجر_سپاسی",
+    "پرسپولیس": "#پرسپولیس",
+    "استقلال": "#استقلال",
+    "سپاهان": "#سپاهان",
+    "تراکتور": "#تراکتور",
+    "تیم ملی": "#تیم_ملی",
+    "تخت جمشید|پارسه": "#تخت_جمشید",
+    "حافظیه|حافظ": "#حافظیه",
+    "سعدیه|سعدی": "#سعدیه",
+    "شاهچراغ": "#شاهچراغ",
+    "دروازه قرآن": "#دروازه_قرآن",
+    "باغ ارم": "#باغ_ارم",
+    "بازار وکیل": "#بازار_وکیل",
+    "مترو شیراز|خط مترو": "#مترو_شیراز",
+    "شهرداری شیراز|شهردار شیراز": "#شهرداری_شیراز",
+    "دانشگاه شیراز": "#دانشگاه_شیراز",
+    "علوم پزشکی شیراز": "#علوم_پزشکی_شیراز",
+    "تنگه هرمز": "#تنگه_هرمز",
+    "خلیج فارس": "#خلیج_فارس",
+    "صدرا|شهر صدرا": "#شهر_صدرا",
+    "مرودشت": "#مرودشت",
+    "کازرون": "#کازرون",
+    "جهرم": "#جهرم",
+    "لارستان|شهر لار": "#لارستان",
+    "فسا": "#فسا",
+    "داراب": "#داراب",
+    "فیروزآباد": "#فیروزآباد",
+    "ممسنی|نورآباد": "#ممسنی",
+    "آباده": "#آباده",
+    "سپیدان|مارگون": "#سپیدان",
+    "پاسارگاد": "#پاسارگاد"
 }
+
+# ۲. بانک جامع هشتگ‌های ترند و پربازدید توییتر فارسی بر اساس موضوع خبر
+TRENDING_CATEGORY_RULES = [
+    (
+        "اصابت|شلیک|موشک|پدافند|انفجار|سپاه|تنگه هرمز|ارتش|حمله|جنگ|پهپاد|نظامی|امنیتی",
+        ["#فوری", "#ایران", "#خبر_فوری", "#انفجار", "#سپاه", "#امنیت"]
+    ),
+    (
+        "طلا|سکه|دلار|یورو|تورم|بازار|قیمت|اقتصاد|مسکن|بورس|یارانه|کالابرگ|معیشت|خودرو|بانک",
+        ["#دلار", "#طلا", "#سکه", "#اقتصاد", "#تورم", "#قیمت_طلا"]
+    ),
+    (
+        "فوتبال|فجر|سپاسی|لیگ برتر|ورزش|استقلال|پرسپولیس|ورزشگاه پارس|گل |داور|جام حذفی",
+        ["#فوتبال", "#لیگ_برتر", "#فجر_سپاسی", "#ورزش_فارس", "#ورزشی"]
+    ),
+    (
+        "ترافیک|مسدود|راهور|تصادف|دروازه قرآن|بلوار چمران|کمربندی|جاده|پلیس راه",
+        ["#ترافیک", "#شیراز", "#راهور", "#حوادث_شیراز", "#خبر_فوری"]
+    ),
+    (
+        "حادثه|آتش‌سوزی|آتش سوزی|اورژانس|پلیس|بازداشت|قتل|سرقت|زورگیری|زلزله|سیل|غرق",
+        ["#حوادث", "#خبر_فوری", "#فوری", "#پلیس", "#اورژانس", "#حوادث_شیراز"]
+    ),
+    (
+        "شهرداری|مترو|شورای شهر|عمرانی|خیابان|پل |بزرگراه|آسفالت|بوستان|تاکسی|اتوبوس",
+        ["#شهرداری_شیراز", "#کلانشهر_شیراز", "#مترو_شیراز", "#شورای_شهر"]
+    ),
+    (
+        "هواشناسی|باران|برف|آلودگی هوا|دما|سد درودزن|آبفا|قطعی برق|قطعی آب|طوفان|گردوخاک",
+        ["#هواشناسی", "#باران", "#قطعی_برق", "#آلودگی_هوا", "#وضعیت_هوا"]
+    ),
+    (
+        "تعطیل|تعطیلی|مدارس|دانشگاه|آموزش و پرورش|کنکور|دانشجو|فرهنگیان|امتحانات",
+        ["#تعطیلی_مدارس", "#فوری", "#دانشگاه_شیراز", "#آموزش_و_پرورش", "#دانشجو"]
+    ),
+    (
+        "دادگستری|قوه قضاییه|دادستان|حکم|پرونده|تعزیرات|قاچاق",
+        ["#قوه_قضاییه", "#پلیس", "#خبر_فوری", "#حوادث"]
+    ),
+    (
+        "حافظیه|سعدی|تخت جمشید|گردشگری|مسافر|میراث فرهنگی|نوروز|کافه|بافت تاریخی|هتل",
+        ["#شیرازگردی", "#گردشگری", "#تخت_جمشید", "#حافظیه", "#ایرانگردی"]
+    ),
+    (
+        "رییس جمهور|رئیس جمهور|دولت|مجلس|وزیر|استاندار فارس|فرماندار|انتخابات|سیاسی",
+        ["#ایران", "#دولت", "#مجلس", "#استان_فارس", "#سیاسی"]
+    )
+]
 
 def load_history():
     if os.path.exists(HISTORY_FILE):
@@ -64,7 +135,6 @@ def clean_line_text(line):
     return to_persian_num(line.strip())
 
 def ensure_sentence_end(text):
-    """اطمینان از پایان جمله با نقطه یا علامت نگارشی معتبر"""
     t = text.strip().rstrip("،؛:- ")
     if not t:
         return ""
@@ -73,7 +143,6 @@ def ensure_sentence_end(text):
     return t
 
 def detect_hook_prefix(raw_text, has_video=False):
-    """تولید قلاب بصری خط اول طبق دستورالعمل استاندارد X"""
     if re.search("فوری|انفجار|اصابت|شلیک|زلزله|آتش‌سوزی|تصادف شدید|مسدود", raw_text):
         return "🔴 فوری:"
     if has_video or "🎥" in raw_text or "ویدیو" in raw_text:
@@ -86,18 +155,40 @@ def detect_hook_prefix(raw_text, has_video=False):
         return "🚨 اطلاعیه شهری:"
     return "📌 شیراز:"
 
-def select_top_hashtags(raw_text):
+def select_trending_hashtags(raw_text, max_count=6):
+    """
+    انتخاب هوشمند ۵ تا ۶ هشتگ ترکیبی از:
+    ۱. موجودیت‌های دقیق داخل خبر (شهر، تیم، مکان)
+    ۲. هشتگ‌های ترند توییتر فارسی متناسب با موضوع خبر
+    ۳. هشتگ‌های پایه شیراز و فارس
+    """
     tags = []
-    for pattern, pattern_tags in TAG_RULES.items():
+
+    # اگر خبر مربوط به شیراز یا فارس است، همیشه #شیراز اول باشد
+    if re.search("شیراز|فارس|مرودشت|کازرون|جهرم|لار|فسا|صدرا", raw_text):
+        tags.append("#شیراز")
+
+    # ۱. استخراج موجودیت‌های مستقیم از داخل متن خبر
+    for pattern, entity_tag in DIRECT_ENTITY_TAGS.items():
+        if re.search(pattern, raw_text) and entity_tag not in tags:
+            tags.append(entity_tag)
+
+    # ۲. افزودن هشتگ‌های ترند موضوعی توییتر
+    for pattern, cat_tags in TRENDING_CATEGORY_RULES:
         if re.search(pattern, raw_text):
-            for t in pattern_tags:
-                if t not in tags:
-                    tags.append(t)
-    if not tags:
-        tags = ["#شیراز", "#اخبار_شیراز"]
-    elif len(tags) == 1:
-        tags.append("#اخبار_شیراز" if tags[0] == "#شیراز" else "#شیراز")
-    return " ".join(tags[:2])
+            for ct in cat_tags:
+                if ct not in tags:
+                    tags.append(ct)
+
+    # ۳. تکمیل با هشتگ‌های پربازدید عمومی شیراز و ایران در صورت کم بودن
+    fallback_trending = ["#شیراز", "#اخبار_شیراز", "#فارس", "#خبر_فوری", "#ایران"]
+    for ft in fallback_trending:
+        if len(tags) >= max_count:
+            break
+        if ft not in tags:
+            tags.append(ft)
+
+    return tags[:max_count]
 
 def split_on_sentence_boundary(text, max_weight):
     """شکستن هوشمند متن دقیقاً روی نقطه پایان جملات (بدون بریدن وسط کلمه)"""
@@ -110,7 +201,6 @@ def split_on_sentence_boundary(text, max_weight):
 
     candidate = text[:cut_idx]
 
-    # اولویت ۱: شکستن دقیق روی نقطه پایان جمله (. یا ! یا ؟ یا /)
     for sep in [". ", "!\n", "؟ ", "؛ ", "/ "]:
         pos = candidate.rfind(sep)
         if pos > int(cut_idx * 0.45):
@@ -118,14 +208,12 @@ def split_on_sentence_boundary(text, max_weight):
             part2 = text[pos + 1:].strip()
             return part1, part2
 
-    # اولویت ۲: شکستن روی ویرگول در صورت طولانی بودن تک‌جمله
     pos_comma = candidate.rfind("، ")
     if pos_comma > int(cut_idx * 0.55):
         part1 = candidate[:pos_comma].strip() + "."
         part2 = text[pos_comma + 1:].strip()
         return part1, part2
 
-    # اولویت ۳: آخرین فاصله کامل بین کلمات
     pos_space = candidate.rfind(" ")
     if pos_space > 0:
         return candidate[:pos_space].strip(), text[pos_space:].strip()
@@ -133,15 +221,6 @@ def split_on_sentence_boundary(text, max_weight):
     return candidate.strip(), text[cut_idx:].strip()
 
 def build_tweet_boxes(raw_text, has_video=False):
-    """
-    پیاده‌سازی کامل دستورالعمل ۴ بندی:
-    - خط ۱: قلاب بصری + تیتر
-    - خط ۲: فاصله
-    - خط ۳: لید و بدنه خبری با پایان فعل کامل
-    - خط ۴: فاصله
-    - خط ۵: دو هشتگ مرتبط
-    - اگر ۲ یا چند توییـته شد: درج عدد 1 و 2 و 3 در پایین سمت راست هر توییت
-    """
     lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
 
     content_lines = []
@@ -169,36 +248,41 @@ def build_tweet_boxes(raw_text, has_video=False):
 
     lead_parts = [clean_line_text(l) for l in content_lines[1:] if len(clean_line_text(l)) > 10]
     full_lead = ensure_sentence_end(" ".join(lead_parts))
-    hashtags = select_top_hashtags(raw_text)
+
+    # دریافت ۶ هشتگ ترند مرتبط با موضوع خبر
+    all_tags = select_trending_hashtags(raw_text, max_count=6)
+    hashtags_full_str = " ".join(all_tags[:5])
 
     # حالت اول: خبر فقط تیتر دارد
     if not full_lead:
-        return [f"{title_line}\n\n{hashtags}\n🛑 @shirazlastnews"]
+        return [f"{title_line}\n\n{hashtags_full_str}\n🛑 @shirazlastnews"]
 
-    # بررسی جا شدن کل خبر در یک توییت واحد طبق قالب ۵ خطی دستورالعمل
-    single_candidate = f"{title_line}\n\n{full_lead}\n\n{hashtags}"
-    if calc_x_len(single_candidate) <= 275:
-        return [single_candidate]
+    # بررسی جا شدن کل خبر با ۵ یا ۶ هشتگ در یک توییت واحد
+    for tag_cnt in [6, 5, 4]:
+        tags_str = " ".join(all_tags[:tag_cnt])
+        single_candidate = f"{title_line}\n\n{full_lead}\n\n{tags_str}"
+        if calc_x_len(single_candidate) <= 275:
+            return [single_candidate]
 
-    # حالت دوم: خبر طولانی است و باید تبدیل به رشته‌توییت (Thread) شود
+    # حالت دوم: خبر طولانی است -> ساخت رشته‌توییت (Thread) با ۴ تا ۵ هشتگ ترند
     raw_boxes = []
-    # رزرو فضا برای تیتر + فاصله + هشتگ‌ها + شماره رشته‌توییت در پایین سمت راست
-    overhead_box1 = calc_x_len(title_line) + calc_x_len(hashtags) + 14
+    box1_tags_str = " ".join(all_tags[:4])
+    overhead_box1 = calc_x_len(title_line) + calc_x_len(box1_tags_str) + 14
     avail_lead_box1 = 272 - overhead_box1
 
     if avail_lead_box1 >= 65:
         lead_part1, remaining_lead = split_on_sentence_boundary(full_lead, avail_lead_box1)
-        raw_boxes.append(f"{title_line}\n\n{lead_part1}\n\n{hashtags}")
+        raw_boxes.append(f"{title_line}\n\n{lead_part1}\n\n{box1_tags_str}")
     else:
-        # اگر تیتر خیلی بلند بود، تیتر و هشتگ در توییت اول و لید کامل در توییت دوم
-        raw_boxes.append(f"{title_line}\n\n{hashtags}")
+        raw_boxes.append(f"{title_line}\n\n{box1_tags_str}")
         remaining_lead = full_lead
 
-    footer_ref = "📢 جزئیات بیشتر در تلگرام:\n🛑 @shirazlastnews"
+    # در آخرین توییتِ رشته، علاوه بر آیدی کانال، هشتگ‌های مکمل هم قرار می‌گیرند
+    extra_tags_str = " ".join(all_tags[2:6]) if len(all_tags) > 2 else box1_tags_str
+    footer_ref = f"📢 جزئیات بیشتر در تلگرام:\n🛑 @shirazlastnews\n{extra_tags_str}"
 
     while remaining_lead:
         remaining_lead = ensure_sentence_end(remaining_lead)
-        # بررسی اینکه آیا ادامه متن + ارجاع به تلگرام در همین باکس جا می‌شود؟
         candidate_final = f"{remaining_lead}\n\n{footer_ref}"
         if calc_x_len(candidate_final) <= 266:
             raw_boxes.append(candidate_final)
@@ -210,15 +294,13 @@ def build_tweet_boxes(raw_text, has_video=False):
                 break
             raw_boxes.append(part_next)
             if len(raw_boxes) >= 4:
-                # حداکثر ۴ توییت در هر رشته؛ قرار دادن ارجاع تلگرام در آخرین باکس
                 raw_boxes[-1] = f"{part_next}\n\n{footer_ref}"
                 break
 
-    # افزودن شماره (1، 2، 3...) در پایین سمت راست (با کاراکتر راست‌چین \u200f) در صورت چندبخشی بودن
+    # افزودن شماره (1، 2، 3...) در پایین سمت راست در صورت چندبخشی بودن
     if len(raw_boxes) > 1:
         numbered_boxes = []
         for idx, b_txt in enumerate(raw_boxes, 1):
-            # کاراکتر \u200f تضمین می‌کند که عدد دقیقاً در پایین سمت راست توییت قرار بگیرد
             numbered_boxes.append(f"{b_txt}\n\u200f{idx}")
         return numbered_boxes
 
@@ -385,7 +467,7 @@ def post_thread_with_real_browser(tweet_boxes, photo_url=None, video_url=None):
             page.keyboard.press("Control+Enter")
 
         page.wait_for_timeout(8000 if is_video else 6000)
-        print("✅ خبر با ساختار جدید و شماره‌گذاری رشته‌توییت در X منتشر شد!")
+        print("✅ خبر با هشتگ‌های ترند و شماره‌گذاری رشته‌توییت در X منتشر شد!")
         browser.close()
 
 def main():
@@ -400,7 +482,7 @@ def main():
 
     if not new_posts:
         if EVENT_NAME in ("workflow_dispatch", "repository_dispatch"):
-            print("اجرای دستی: ارسال آخرین خبر با ساختار استاندارد جدید...")
+            print("اجرای دستی: ارسال آخرین خبر با هشتگ‌های ترند جدید...")
             target_post = posts[-1]
         else:
             print("همه اخبار فعلی قبلاً در X منتشر شده‌اند.")
