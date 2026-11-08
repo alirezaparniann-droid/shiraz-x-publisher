@@ -12,14 +12,15 @@ EVENT_NAME = os.environ.get("GITHUB_EVENT_NAME", "")
 
 HISTORY_FILE = "posted_x_ids.json"
 
-# بانک هشتگ‌های کوتاه و پربازدید متناسب با موضوع خبر
+# بانک هشتگ‌های استاندارد و هدفمند متناسب با دستورالعمل X
 TAG_RULES = {
-    "اصابت|شلیک|موشک|پدافند|انفجار|سپاه|تنگه هرمز|ارتش|حمله": ["#جنگ", "#انفجار"],
-    "حادثه|آتش|تصادف|اورژانس|پلیس|بازداشت|قتل|سرقت|زلزله": ["#حوادث", "#خبر_فوری"],
-    "فوتبال|فجر|سپاسی|لیگ|ورزش|استقلال|پرسپولیس|ورزشگاه": ["#فجر_سپاسی", "#فوتبال"],
-    "شهرداری|مترو|ترافیک|شورای_شهر|عمران|خیابان|پل": ["#شیراز", "#شهرداری_شیراز"],
+    "اصابت|شلیک|موشک|پدافند|انفجار|سپاه|تنگه هرمز|ارتش|حمله": ["#شیراز", "#خبر_فوری"],
+    "ترافیک|مسدود|راهور|تصادف|دروازه قرآن|چمران|کمربندی": ["#شیراز", "#ترافیک"],
+    "حادثه|آتش|اورژانس|پلیس|بازداشت|قتل|سرقت|زلزله|سیل": ["#شیراز", "#حوادث"],
+    "فوتبال|فجر|سپاسی|لیگ|ورزش|استقلال|پرسپولیس|ورزشگاه": ["#شیراز", "#فجر_سپاسی"],
+    "شهرداری|مترو|شورای_شهر|عمران|خیابان|پل|بزرگراه": ["#شیراز", "#شهرداری_شیراز"],
     "هواشناسی|باران|برف|آلودگی|دما|سد|آب|برق": ["#شیراز", "#هواشناسی"],
-    "طلا|سکه|دلار|تورم|بازار|قیمت|اقتصاد|مسکن": ["#اقتصاد", "#طلا"],
+    "طلا|سکه|دلار|تورم|بازار|قیمت|اقتصاد|مسکن": ["#شیراز", "#اقتصاد"],
     "حافظیه|سعدی|تخت_جمشید|گردشگری|مسافر|میراث": ["#شیراز", "#شیرازگردی"]
 }
 
@@ -42,7 +43,7 @@ def to_persian_num(text):
     return text.translate(str.maketrans(en_nums, fa_nums))
 
 def calc_x_len(text):
-    """محاسبه دقیق طول کاراکتر طبق استاندارد X (حروف فارسی ۱ واحد، ایموجی ۲ واحد)"""
+    """محاسبه دقیق وزن کاراکترها طبق الگوریتم ۲۸۰ کاراکتری X"""
     weight = 0
     for ch in text:
         if ord(ch) >= 0x2300:
@@ -51,18 +52,39 @@ def calc_x_len(text):
             weight += 1
     return weight
 
-def clean_line_prefix(line):
+def clean_line_text(line):
+    """حذف ایموجی‌های تزیینی تلگرام و مقدمه‌چینی‌های اضافی خبرگزاری‌ها"""
     line = re.sub(r"^[\s🔴🟠🟡🟢🔵🟣⚫️⚪️🟤🚨📌⚽️🌤🔹🔸▫️▪️•\-_#*«»🎬⭕️✅🎥]+", "", line)
+    line = re.sub(
+        r"^به گزارش\s+(خبرنگار\s+|گروه\s+[^،]{2,20}\s+)?(خبرگزاری\s+|پایگاه خبری\s+)?(ایرنا|مهر|تسنیم|ایسنا|فارس|صدا و سیما|صداوسیما|دانشجو)[^،:]{0,25}[،:]\s*",
+        "",
+        line
+    )
+    line = re.sub(r"^[\s🔹🔸▫️▪️•\-]+", "", line)
     return to_persian_num(line.strip())
 
-def style_lead_with_diamond(lead_text):
-    """افزودن علامت 🔸 بعد از منبع نقل‌قول (مانند: خبرنگار صداوسیما: 🔸...)"""
-    if "🔸" in lead_text:
-        return lead_text
-    match = re.match(r"^([^:：]{3,35}[:：])\s*(.+)$", lead_text)
-    if match:
-        return f"{match.group(1)} 🔸{match.group(2)}"
-    return f"🔸{lead_text}"
+def ensure_sentence_end(text):
+    """اطمینان از پایان جمله با نقطه یا علامت نگارشی معتبر"""
+    t = text.strip().rstrip("،؛:- ")
+    if not t:
+        return ""
+    if t[-1] not in [".", "!", "؟", "»"]:
+        t += "."
+    return t
+
+def detect_hook_prefix(raw_text, has_video=False):
+    """تولید قلاب بصری خط اول طبق دستورالعمل استاندارد X"""
+    if re.search("فوری|انفجار|اصابت|شلیک|زلزله|آتش‌سوزی|تصادف شدید|مسدود", raw_text):
+        return "🔴 فوری:"
+    if has_video or "🎥" in raw_text or "ویدیو" in raw_text:
+        return "🎥 ویدیو:"
+    if re.search("فوتبال|فجر|سپاسی|لیگ برتر|گل |ورزشگاه|پرسپولیس|استقلال", raw_text):
+        return "⚽️ ورزشی:"
+    if re.search("هواشناسی|باران|برف|دما|آلودگی|هشدار", raw_text):
+        return "🌤 هواشناسی:"
+    if re.search("ترافیک|شهرداری|مترو|عمرانی|خیابان|بلوار", raw_text):
+        return "🚨 اطلاعیه شهری:"
+    return "📌 شیراز:"
 
 def select_top_hashtags(raw_text):
     tags = []
@@ -74,57 +96,54 @@ def select_top_hashtags(raw_text):
     if not tags:
         tags = ["#شیراز", "#اخبار_شیراز"]
     elif len(tags) == 1:
-        tags.append("#شیراز")
+        tags.append("#اخبار_شیراز" if tags[0] == "#شیراز" else "#شیراز")
     return " ".join(tags[:2])
 
-def split_text_cleanly(text, max_weight):
-    """برش متن در انتهای جمله یا ویرگول یا فاصله، بدون ناقص شدن کلمات"""
+def split_on_sentence_boundary(text, max_weight):
+    """شکستن هوشمند متن دقیقاً روی نقطه پایان جملات (بدون بریدن وسط کلمه)"""
     if calc_x_len(text) <= max_weight:
         return text, ""
 
-    # پیدا کردن بیشترین کاراکتر مجاز
     cut_idx = len(text)
     while cut_idx > 0 and calc_x_len(text[:cut_idx]) > max_weight:
         cut_idx -= 1
 
     candidate = text[:cut_idx]
 
-    # اولویت ۱: برش در پایان جمله (. یا ! یا ؟ یا /)
-    for sep in [". ", "!\n", "؟ ", ". ", "/ "]:
+    # اولویت ۱: شکستن دقیق روی نقطه پایان جمله (. یا ! یا ؟ یا /)
+    for sep in [". ", "!\n", "؟ ", "؛ ", "/ "]:
         pos = candidate.rfind(sep)
-        if pos > int(cut_idx * 0.55):
-            part1 = candidate[:pos + 1].strip()
+        if pos > int(cut_idx * 0.45):
+            part1 = ensure_sentence_end(candidate[:pos + 1])
             part2 = text[pos + 1:].strip()
             return part1, part2
 
-    # اولویت ۲: برش در ویرگول (،)
-    for sep in ["، ", "؛ "]:
-        pos = candidate.rfind(sep)
-        if pos > int(cut_idx * 0.60):
-            part1 = candidate[:pos + 1].strip()
-            part2 = text[pos + 1:].strip()
-            return part1, part2
+    # اولویت ۲: شکستن روی ویرگول در صورت طولانی بودن تک‌جمله
+    pos_comma = candidate.rfind("، ")
+    if pos_comma > int(cut_idx * 0.55):
+        part1 = candidate[:pos_comma].strip() + "."
+        part2 = text[pos_comma + 1:].strip()
+        return part1, part2
 
-    # اولویت ۳: برش در آخرین فاصله بین کلمات
-    pos = candidate.rfind(" ")
-    if pos > 0:
-        return candidate[:pos].strip(), text[pos:].strip()
+    # اولویت ۳: آخرین فاصله کامل بین کلمات
+    pos_space = candidate.rfind(" ")
+    if pos_space > 0:
+        return candidate[:pos_space].strip(), text[pos_space:].strip()
 
     return candidate.strip(), text[cut_idx:].strip()
 
 def build_tweet_boxes(raw_text, has_video=False):
     """
-    ساخت کادرهای توییت دقیقاً مشابه الگوی درخواستی:
-    ⭕️ 🎥تیتر
-
-    ✅ لید کامل (همراه با 🔸)
-    🛑 @shirazlastnews
-    #هشتگ۱ #هشتگ۲
-    (اگر طولانی بود، ادامه لید به صورت کامل در کادر دوم قرار می‌گیرد)
+    پیاده‌سازی کامل دستورالعمل ۴ بندی:
+    - خط ۱: قلاب بصری + تیتر
+    - خط ۲: فاصله
+    - خط ۳: لید و بدنه خبری با پایان فعل کامل
+    - خط ۴: فاصله
+    - خط ۵: دو هشتگ مرتبط
+    - اگر ۲ یا چند توییـته شد: درج عدد 1 و 2 و 3 در پایین سمت راست هر توییت
     """
     lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
 
-    # حذف خطوط اضافی تلگرام (منبع خبر، لینک، آیدی و هشتگ‌های قدیمی)
     content_lines = []
     for l in lines:
         if any(
@@ -144,59 +163,66 @@ def build_tweet_boxes(raw_text, has_video=False):
     if not content_lines:
         return []
 
-    is_vid = has_video or ("🎥" in raw_text) or ("ویدیو" in lines[0]) or ("فیلم" in lines[0])
-    raw_title = clean_line_prefix(content_lines[0])
-    title_prefix = "⭕️ 🎥" if is_vid else "⭕️ "
-    title_line = f"{title_prefix}{raw_title}"
+    hook = detect_hook_prefix(raw_text, has_video=has_video)
+    raw_title = clean_line_text(content_lines[0]).rstrip(".")
+    title_line = f"{hook} {raw_title}"
 
-    # جمع‌آوری کامل لید خبر از تمام خطوط متنی باقی‌مانده
-    lead_parts = [clean_line_prefix(l) for l in content_lines[1:] if len(clean_line_prefix(l)) > 10]
-    full_lead_raw = " ".join(lead_parts).strip()
-
+    lead_parts = [clean_line_text(l) for l in content_lines[1:] if len(clean_line_text(l)) > 10]
+    full_lead = ensure_sentence_end(" ".join(lead_parts))
     hashtags = select_top_hashtags(raw_text)
-    footer_block = f"🛑 @shirazlastnews\n{hashtags}"
 
-    # اگر خبر فقط تیتر داشت
-    if not full_lead_raw:
-        box1 = f"{title_line}\n\n{footer_block}"
-        return [box1]
+    # حالت اول: خبر فقط تیتر دارد
+    if not full_lead:
+        return [f"{title_line}\n\n{hashtags}\n🛑 @shirazlastnews"]
 
-    styled_lead = style_lead_with_diamond(full_lead_raw)
-    lead_line = f"✅ {styled_lead}"
+    # بررسی جا شدن کل خبر در یک توییت واحد طبق قالب ۵ خطی دستورالعمل
+    single_candidate = f"{title_line}\n\n{full_lead}\n\n{hashtags}"
+    if calc_x_len(single_candidate) <= 275:
+        return [single_candidate]
 
-    # بررسی جا شدن کامل در ۱ توییت (حداکثر ۲۷۶ کاراکتر استاندارد X)
-    single_tweet = f"{title_line}\n\n{lead_line}\n{footer_block}"
-    if calc_x_len(single_tweet) <= 276:
-        return [single_tweet]
+    # حالت دوم: خبر طولانی است و باید تبدیل به رشته‌توییت (Thread) شود
+    raw_boxes = []
+    # رزرو فضا برای تیتر + فاصله + هشتگ‌ها + شماره رشته‌توییت در پایین سمت راست
+    overhead_box1 = calc_x_len(title_line) + calc_x_len(hashtags) + 14
+    avail_lead_box1 = 272 - overhead_box1
 
-    # اگر مجموع تیتر و لید کامل از ۲۷۶ کاراکتر بیشتر بود -> تقسیم در کادر اول و کادر دوم (بدون حذف هیچ کلمه‌ای)
-    boxes = []
-    header_and_check = f"{title_line}\n\n✅ "
-    avail_in_box1 = 272 - calc_x_len(header_and_check)
-
-    if avail_in_box1 >= 70:
-        part1, remaining_lead = split_text_cleanly(styled_lead, avail_in_box1)
-        boxes.append(f"{title_line}\n\n✅ {part1}")
+    if avail_lead_box1 >= 65:
+        lead_part1, remaining_lead = split_on_sentence_boundary(full_lead, avail_lead_box1)
+        raw_boxes.append(f"{title_line}\n\n{lead_part1}\n\n{hashtags}")
     else:
-        # اگر خود تیتر خیلی طولانی بود، تیتر در کادر اول و کل لید در کادر دوم قرار می‌گیرد
-        boxes.append(title_line)
-        remaining_lead = styled_lead
+        # اگر تیتر خیلی بلند بود، تیتر و هشتگ در توییت اول و لید کامل در توییت دوم
+        raw_boxes.append(f"{title_line}\n\n{hashtags}")
+        remaining_lead = full_lead
 
-    # قرار دادن ادامه کامل لید + امضا + هشتگ در کادر دوم (و سوم در صورت نیاز)
+    footer_ref = "📢 جزئیات بیشتر در تلگرام:\n🛑 @shirazlastnews"
+
     while remaining_lead:
-        candidate_last_box = f"✅ {remaining_lead}\n{footer_block}"
-        if calc_x_len(candidate_last_box) <= 276:
-            boxes.append(candidate_last_box)
+        remaining_lead = ensure_sentence_end(remaining_lead)
+        # بررسی اینکه آیا ادامه متن + ارجاع به تلگرام در همین باکس جا می‌شود؟
+        candidate_final = f"{remaining_lead}\n\n{footer_ref}"
+        if calc_x_len(candidate_final) <= 266:
+            raw_boxes.append(candidate_final)
             break
         else:
-            part_next, remaining_lead = split_text_cleanly(remaining_lead, 265)
-            boxes.append(f"✅ {part_next}")
-            if len(boxes) >= 3:
-                # در کادر آخر امضا و هشتگ را می‌چسبانیم
-                boxes[-1] = f"✅ {part_next}\n{footer_block}"
+            part_next, remaining_lead = split_on_sentence_boundary(remaining_lead, 258)
+            if not remaining_lead:
+                raw_boxes.append(f"{part_next}\n\n{footer_ref}")
+                break
+            raw_boxes.append(part_next)
+            if len(raw_boxes) >= 4:
+                # حداکثر ۴ توییت در هر رشته؛ قرار دادن ارجاع تلگرام در آخرین باکس
+                raw_boxes[-1] = f"{part_next}\n\n{footer_ref}"
                 break
 
-    return boxes
+    # افزودن شماره (1، 2، 3...) در پایین سمت راست (با کاراکتر راست‌چین \u200f) در صورت چندبخشی بودن
+    if len(raw_boxes) > 1:
+        numbered_boxes = []
+        for idx, b_txt in enumerate(raw_boxes, 1):
+            # کاراکتر \u200f تضمین می‌کند که عدد دقیقاً در پایین سمت راست توییت قرار بگیرد
+            numbered_boxes.append(f"{b_txt}\n\u200f{idx}")
+        return numbered_boxes
+
+    return raw_boxes
 
 def fetch_latest_telegram_posts():
     url = f"https://t.me/s/{CHANNEL}"
@@ -308,7 +334,6 @@ def post_thread_with_real_browser(tweet_boxes, photo_url=None, video_url=None):
         if "login" in page.url.lower():
             raise RuntimeError("کوکی‌های X منقضی یا اشتباه هستند.")
 
-        # ۱. آماده‌سازی کادر اول و آپلود رسانه
         textbox_0 = page.locator('[data-testid="tweetTextarea_0"]').first
         textbox_0.wait_for(state="visible", timeout=30000)
         textbox_0.click(force=True)
@@ -327,14 +352,12 @@ def post_thread_with_real_browser(tweet_boxes, photo_url=None, video_url=None):
             except Exception as e:
                 print(f"ادامه بدون پیوست فایل رسانه: {e}")
 
-        # ۲. نوشتن کادر اول و در صورت نیاز افزودن کادر دوم (رشته‌توییت همزمان)
         for idx, box_text in enumerate(tweet_boxes):
             if idx > 0:
                 page.keyboard.press("Escape")
                 page.wait_for_timeout(500)
                 add_btn = page.locator('[data-testid="addButton"]').first
                 if add_btn.count() > 0:
-                    # کلیک مستقیم جاوااسکریپت روی دکمه + برای عبور از هر لایه مزاحم
                     add_btn.evaluate("el => el.click()")
                     print(f"کادر شماره {idx + 1} رشته‌توییت باز شد.")
                     page.wait_for_timeout(1800)
@@ -348,7 +371,6 @@ def post_thread_with_real_browser(tweet_boxes, photo_url=None, video_url=None):
             page.keyboard.press("Escape")
             page.wait_for_timeout(500)
 
-        # ۳. ارسال نهایی (تک‌توییت یا رشته‌توییت کامل)
         post_button = page.locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]').first
         for _ in range(10):
             if post_button.get_attribute("aria-disabled") == "true":
@@ -363,7 +385,7 @@ def post_thread_with_real_browser(tweet_boxes, photo_url=None, video_url=None):
             page.keyboard.press("Control+Enter")
 
         page.wait_for_timeout(8000 if is_video else 6000)
-        print("✅ خبر به صورت کامل و بدون بریدگی در X منتشر شد!")
+        print("✅ خبر با ساختار جدید و شماره‌گذاری رشته‌توییت در X منتشر شد!")
         browser.close()
 
 def main():
@@ -378,7 +400,7 @@ def main():
 
     if not new_posts:
         if EVENT_NAME in ("workflow_dispatch", "repository_dispatch"):
-            print("اجرای دستی: ارسال آخرین خبر با قالب کامل جدید...")
+            print("اجرای دستی: ارسال آخرین خبر با ساختار استاندارد جدید...")
             target_post = posts[-1]
         else:
             print("همه اخبار فعلی قبلاً در X منتشر شده‌اند.")
@@ -391,7 +413,7 @@ def main():
     if not tweet_boxes:
         return
 
-    print(f"تعداد کادرهای آماده ارسال برای این خبر: {len(tweet_boxes)}")
+    print(f"تعداد کادرهای آماده ارسال: {len(tweet_boxes)}")
     for i, b in enumerate(tweet_boxes, 1):
         print(f"--- کادر {i} ({calc_x_len(b)} کاراکتر) ---\n{b}\n")
 
